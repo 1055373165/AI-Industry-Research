@@ -1,0 +1,25 @@
+[project]
+name = "ai-industry-research"
+version = "0.1.0"
+description = "AIR — 机构级产业链投研流水线：递归 BOM 拆解 → 瓶颈排序 → 标的映射 → 对抗评审 → 三件套交付"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "sunmengyu", email = "smy4965485@gmail.com" }]
+keywords = ["ai-agent", "investment-research", "industry-chain", "claude-code", "harness-engineering"]
+
+[project.urls]
+Homepage = "https://github.com/1055373165/AI-Industry-Research"
+
+[project.scripts]
+air = "air.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["air*"]
+
+[tool.setuptools.package-data]
+air = ["prompts/*.md"]
