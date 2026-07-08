@@ -57,7 +57,7 @@ def main() -> None:
     pipe = Pipeline(topic, workdir, budget_usd=args.budget,
                     model_fanout=args.model_fanout, model_review=args.model_review)
     try:
-        run_dir = pipe.run()
+        run_dir = pipe.run(resume_slug=args.resume)
     except BudgetExceeded as e:
         sys.exit(f"⛔ {e}")
     print(f"\n📄 报告: {run_dir / 'report.md'}\n🗺  画布: {run_dir / 'canvas.md'}\n"

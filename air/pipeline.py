@@ -216,20 +216,26 @@ class Pipeline:
         return self._call("repair", prompt, self.PATCH_SCHEMA, model=self.m_rev, budget=3.0)
 
     # —— 主流程 ——
-    def run(self) -> Path:
-        # scope 决定 slug/run_dir，因此先跑再落盘（resume 时以旧 checkpoint 为准）
-        r = agent.run(_prompt("scope").format(topic=self.topic), system=self.discipline,
-                      schema=schemas.SCOPE, model=self.m_fan, budget_usd=1.0)
-        if not r.ok:
-            raise RuntimeError(f"scope 失败: {r.error}")
-        scope = r.data
-        self.run_dir = self.workdir / scope["slug"]
-        self.run_dir.mkdir(parents=True, exist_ok=True)
-        if self._ck_path("01-scope").exists():
+    def run(self, resume_slug: str | None = None) -> Path:
+        # resume 时直接读 scope checkpoint，不重花 scope 的钱（自愈循环下尤其重要）
+        if resume_slug and (self.workdir / resume_slug / "01-scope.json").exists():
+            self.run_dir = self.workdir / resume_slug
             scope = json.loads(self._ck_path("01-scope").read_text())
         else:
-            self._ck_path("01-scope").write_text(json.dumps(scope, ensure_ascii=False, indent=2))
-        self._ledger("scope", r.cost_usd)
+            # scope 决定 slug/run_dir，因此先跑再落盘
+            r = agent.run(_prompt("scope").format(topic=self.topic), system=self.discipline,
+                          schema=schemas.SCOPE, model=self.m_fan, budget_usd=1.0)
+            if not r.ok:
+                raise RuntimeError(f"scope 失败: {r.error}")
+            scope = r.data
+            self.run_dir = self.workdir / scope["slug"]
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            if self._ck_path("01-scope").exists():
+                scope = json.loads(self._ck_path("01-scope").read_text())
+            else:
+                self._ck_path("01-scope").write_text(
+                    json.dumps(scope, ensure_ascii=False, indent=2))
+            self._ledger("scope", r.cost_usd)
         self._log(f"研究对象: {scope['industry_name']}（{scope['slug']}），预算 ${self.budget}")
 
         boms = self.stage_bom(scope)
