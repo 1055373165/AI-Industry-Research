@@ -62,8 +62,14 @@ class Pipeline:
                 f"checkpoint 已落盘，追加预算后 --resume 继续。")
 
     def _call(self, stage: str, prompt: str, schema: dict, *, model: str | None = None,
-              budget: float = 1.5, timeout: int = 1200, search: bool = True,
-              retries: int = 1):
+              budget: float = 1.5, timeout: int = 2400, search: bool = True,
+              retries: int = 3):
+        # 经验规则（半导体全量首跑沉淀）：
+        # ① 带搜索的深拆调用在巨型板块上可超 20 分钟，时间预算放宽到 40 分钟，
+        #    产出规模由 prompt 约束；
+        # ② 长时间运行会撞上瞬时基础设施故障（401 认证瞬断/Cloudflare 源站错/
+        #    socket 断连，多发于夜间）——重试 3 次 + 递增退避，别让一个故障窗口
+        #    杀死整条流水线。
         for attempt in range(retries + 1):
             r = agent.run(prompt, system=self.discipline, schema=schema,
                           model=model or self.m_fan, budget_usd=budget,
@@ -71,7 +77,12 @@ class Pipeline:
             self._ledger(stage, r.cost_usd)
             if r.ok:
                 return r.data
-            self._log(f"⚠️ {stage} 失败: {r.error}" + ("，重试" if attempt < retries else ""))
+            if attempt < retries:
+                backoff = 60 * (attempt + 1)
+                self._log(f"⚠️ {stage} 失败: {r.error[:200]}，{backoff}s 后重试")
+                time.sleep(backoff)
+            else:
+                self._log(f"⚠️ {stage} 失败: {r.error[:200]}")
         raise RuntimeError(f"{stage} 在 {retries + 1} 次尝试后仍失败")
 
     def _ck_path(self, name: str) -> Path:
