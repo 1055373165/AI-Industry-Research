@@ -71,8 +71,14 @@ class Pipeline:
         #    socket 断连，多发于夜间）——重试 3 次 + 递增退避，别让一个故障窗口
         #    杀死整条流水线。
         for attempt in range(retries + 1):
+            # 最后一搏降级：企业网络会掐长时间大负载的流（opus 评审重灾区），
+            # 末次重试换更快的 sonnet——降级的评审好过没有评审
+            use_model = model or self.m_fan
+            if attempt == retries and use_model != self.m_fan:
+                use_model = self.m_fan
+                self._log(f"↓ {stage} 末次重试降级为 {use_model}")
             r = agent.run(prompt, system=self.discipline, schema=schema,
-                          model=model or self.m_fan, budget_usd=budget,
+                          model=use_model, budget_usd=budget,
                           timeout_s=timeout, search=search)
             self._ledger(stage, r.cost_usd)
             if r.ok:
@@ -191,9 +197,10 @@ class Pipeline:
         for key, spec in REVIEWERS.items():
             if only and key not in only:
                 continue
+            # 负载上限 35k：缩短 opus 长流的暴露窗口（企业网络掐长连接的实测教训）
             results[key] = self._ck(f"{ck_prefix}-{key}", lambda k=key, s=spec: self._call(
                 f"review:{k}", _prompt("review").format(
-                    role=s["role"], lens=s["lens"], report=report[:60000]),
+                    role=s["role"], lens=s["lens"], report=report[:35000]),
                 schemas.REVIEW, model=self.m_rev, budget=2.5))
         return results
 
