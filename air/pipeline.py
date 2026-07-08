@@ -182,16 +182,19 @@ class Pipeline:
         return self._call("cycle", _prompt("cycle").format(
             industry=scope["industry_name"], context=ctx), schemas.CYCLE, budget=2.0)
 
-    def stage_review(self, report: str, only: list[str] | None = None) -> dict[str, dict]:
-        """四类专家对抗评审，各自 fresh 会话。only 限定复审的专家。"""
+    def stage_review(self, report: str, only: list[str] | None = None,
+                     ck_prefix: str = "07-review") -> dict[str, dict]:
+        """四类专家对抗评审，各自 fresh 会话 + 各自 checkpoint
+        （粒度教训：共用 checkpoint 时崩在第三位会重花前两位的钱）。
+        only 限定复审的专家；复审用不同 ck_prefix，保证 fresh 判定。"""
         results = {}
         for key, spec in REVIEWERS.items():
             if only and key not in only:
                 continue
-            results[key] = self._call(
-                f"review:{key}", _prompt("review").format(
-                    role=spec["role"], lens=spec["lens"], report=report[:60000]),
-                schemas.REVIEW, model=self.m_rev, budget=2.5)
+            results[key] = self._ck(f"{ck_prefix}-{key}", lambda k=key, s=spec: self._call(
+                f"review:{k}", _prompt("review").format(
+                    role=s["role"], lens=s["lens"], report=report[:60000]),
+                schemas.REVIEW, model=self.m_rev, budget=2.5))
         return results
 
     PATCH_SCHEMA = {
@@ -252,7 +255,7 @@ class Pipeline:
                                     reviews=None, issues=issues, spent=self.spent)
 
         # 对抗评审 → 修复 → 复审
-        reviews = self._ck("07-review", lambda: self.stage_review(report_v1))
+        reviews = self.stage_review(report_v1)
         hard_gaps = [g for rv in reviews.values() for g in rv["gaps"]
                      if g["severity"] in ("P0", "P1")]
         patch = None
@@ -263,7 +266,7 @@ class Pipeline:
             report_v2 = assemble.render(self.topic, scope, boms, bns, maps, cards, cycle,
                                         reviews=reviews, issues=issues, patch=patch,
                                         spent=self.spent)
-            reviews2 = self._ck("09-review2", lambda: self.stage_review(report_v2, only=failed))
+            reviews2 = self.stage_review(report_v2, only=failed, ck_prefix="09-review2")
             reviews.update(reviews2)
 
         # 终稿三件套
