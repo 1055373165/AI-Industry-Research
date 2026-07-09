@@ -78,9 +78,23 @@ def render(topic, scope, boms, bns, maps, cards, cycle, *, reviews=None,
 
     A("\n## 2. 全产业链地图\n")
     A(f"研究边界：{scope['boundary']}\n")
-    A("```mermaid\nflowchart LR\n    D0[终端需求]")
-    for k, s in enumerate(scope["l1_systems"]):
-        A(f"    D0 --> S{k}[{s['name']}]")
+    # 价值链方向：使能环节 → 设计 → 制造（设备/材料汇入）→ 封测 → 终端需求
+    # （评审教训：全部从终端需求单向流出无法体现上下游供应与价值传导）
+    A("```mermaid\nflowchart LR")
+    names = [s["name"] for s in scope["l1_systems"]]
+    def _find(kw_list):
+        return [i for i, n in enumerate(names) if any(k in n for k in kw_list)]
+    chain = _find(["EDA", "IP"]) + _find(["设计"]) + _find(["制造", "Fab"]) + \
+        _find(["封装", "封测", "测试"])
+    feeders = _find(["设备"]) + _find(["材料"])
+    others = [i for i in range(len(names)) if i not in chain + feeders]
+    chain = chain + others
+    for a, b in zip(chain, chain[1:]):
+        A(f"    S{a}[{names[a]}] --> S{b}[{names[b]}]")
+    mfg = _find(["制造", "Fab"])
+    for f in feeders:
+        A(f"    S{f}[{names[f]}] --> S{mfg[0] if mfg else chain[-1]}")
+    A(f"    S{chain[-1]} --> D0[终端需求]")
     A("```\n")
     A("| L1 系统 | 决定什么 |\n|---|---|")
     for s in scope["l1_systems"]:
@@ -94,7 +108,7 @@ def render(topic, scope, boms, bns, maps, cards, cycle, *, reviews=None,
             for a in l2["l3_atoms"]:
                 A(f"| {l2['name']} | **{a['name']}** | {'、'.join(a['upstream'][:4])} "
                   f"| {'、'.join(a['midstream'][:4])} | {'、'.join(a['downstream'][:4])} "
-                  f"| {a.get('notes', '')[:60]} |")
+                  f"| {a.get('notes', '')[:200]} |")
 
     A("\n## 4. BOM 瓶颈排序\n")
     A("| 优先级 | 环节 | 需求 | 供给刚性 | 扩产 | 认证 | 价格 | 利润 | 国替 | 兑现 | 稀缺逻辑 |")
@@ -104,7 +118,7 @@ def render(topic, scope, boms, bns, maps, cards, cycle, *, reviews=None,
         A(f"| {i['priority']} | **{i['atom']}** | {s['demand']} | {s['supply_rigidity']} "
           f"| {s['expansion_years']} | {s['certification']} | {s['price_elasticity']} "
           f"| {s['profit_elasticity']} | {s['localization']} | {s['financial_delivery']} "
-          f"| {i['rationale'][:80]} |")
+          f"| {i['rationale'][:200]} |")
 
     A("\n## 5. 国际龙头与 A 股映射\n")
     for m in maps:

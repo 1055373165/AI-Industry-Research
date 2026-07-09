@@ -163,7 +163,8 @@ class Pipeline:
         for layer in ("a_leaders", "a_earnings", "a_darkhorse"):
             for m in maps:
                 for c in m[layer]:
-                    key = c["ticker"] or c["name"]
+                    # 归一化去重：不同映射返回 301269 / 301269.SZ 属同一家（首跑实测重复制卡）
+                    key = (c["ticker"] or c["name"]).upper().split(".")[0]
                     if key in seen or len(core) >= MAX_CARDS:
                         continue
                     seen.add(key)
