@@ -217,13 +217,26 @@ class Pipeline:
         "required": ["corrections", "unresolved"],
     }
 
+    REPAIR_CHUNK = 8  # 单批缺口数：整批 30+ 条的巨型长流在企业网络下必死（实测）
+
     def stage_repair(self, gaps: list[dict], report: str) -> dict:
-        prompt = (f"以下是四类专家对一份「{self.topic}」产业研报的 P0/P1 级缺口清单。\n"
-                  f"逐条处理：能用检索核实并修正的，产出修正内容（写明证据或标注待核验）；"
-                  f"无法在线核实的进 unresolved。\n\n缺口：\n"
-                  f"{json.dumps(gaps, ensure_ascii=False, indent=1)}\n\n"
-                  f"报告相关上下文：\n{report[:40000]}")
-        return self._call("repair", prompt, self.PATCH_SCHEMA, model=self.m_rev, budget=3.0)
+        """分批修复 + 逐批 checkpoint：批间独立，坏一批不拖累已完成的批。"""
+        merged = {"corrections": [], "unresolved": []}
+        for i in range(0, len(gaps), self.REPAIR_CHUNK):
+            batch = gaps[i:i + self.REPAIR_CHUNK]
+            prompt = (f"以下是专家对一份「{self.topic}」产业研报的部分 P0/P1 级缺口"
+                      f"（第 {i // self.REPAIR_CHUNK + 1} 批，共 {len(batch)} 条）。\n"
+                      f"逐条处理：能用检索核实并修正的，产出修正内容（写明证据或标注待核验）；"
+                      f"无法在线核实的进 unresolved。\n\n缺口：\n"
+                      f"{json.dumps(batch, ensure_ascii=False, indent=1)}\n\n"
+                      f"报告相关上下文（节选）：\n{report[:20000]}")
+            data = self._ck(f"08-repair-{i // self.REPAIR_CHUNK + 1}",
+                            lambda p=prompt, n=i // self.REPAIR_CHUNK + 1: self._call(
+                                f"repair:{n}", p, self.PATCH_SCHEMA,
+                                model=self.m_rev, budget=2.0))
+            merged["corrections"] += data.get("corrections", [])
+            merged["unresolved"] += data.get("unresolved", [])
+        return merged
 
     # —— 主流程 ——
     def run(self, resume_slug: str | None = None) -> Path:
@@ -268,7 +281,7 @@ class Pipeline:
         patch = None
         if hard_gaps:
             self._log(f"评审发现 {len(hard_gaps)} 个 P0/P1 缺口，进入修复轮")
-            patch = self._ck("08-repair", lambda: self.stage_repair(hard_gaps, report_v1))
+            patch = self.stage_repair(hard_gaps, report_v1)  # 内部逐批 checkpoint
             failed = [k for k, rv in reviews.items() if rv["verdict"] == "FAIL"]
             report_v2 = assemble.render(self.topic, scope, boms, bns, maps, cards, cycle,
                                         reviews=reviews, issues=issues, patch=patch,
